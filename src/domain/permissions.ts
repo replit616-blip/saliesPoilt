@@ -124,9 +124,9 @@ export const PERMISSION_MATRIX: Matrix = {
   'product.manage': COMPANY_ADMIN_ONLY,
 
   'audit.view': COMPANY_ADMIN_ONLY,
-  'notification.view': { ...TENANT_ROLES_ALL },
+  'notification.view': { ...TENANT_ROLES_ALL, SUPER_ADMIN: 'platform' },
   'account.manage': { ...TENANT_ROLES_ALL, SUPER_ADMIN: 'platform' },
-  'password.approve': COMPANY_ADMIN_ONLY,
+  'password.approve': { ...COMPANY_ADMIN_ONLY, SUPER_ADMIN: 'platform' },
 };
 
 function matchesScope(user: SessionUser, scope: PermissionScope, resource: PermissionResource | undefined): boolean {
@@ -160,7 +160,7 @@ function customRankAllows(user: SessionUser, action: Action): boolean {
 
 export function can(user: SessionUser | null | undefined, action: Action, resource?: PermissionResource): boolean {
   if (!user) return false;
-  if (user.role === 'SUPER_ADMIN' || customRankAllows(user, action)) return true;
+  if (customRankAllows(user, action)) return true;
   const scope = PERMISSION_MATRIX[action][user.role];
   if (!scope) return false;
   return matchesScope(user, scope, resource);

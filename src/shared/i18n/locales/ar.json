@@ -147,7 +147,11 @@
     "statBranches": "الفروع",
     "statTeams": "الفرق",
     "platformTitle": "نظرة عامة على المنصة",
-    "platformBody": "إدارة الشركات ومؤشرات المنصة الشاملة تُضاف في مرحلة لاحقة."
+    "platformCompanies": "الشركات",
+    "platformCompanyAdmins": "مديرو الشركات",
+    "platformEmployees": "الموظفون المسجلون",
+    "platformPendingRequests": "طلبات كلمات مرور معلقة",
+    "platformRecentApproved": "طلبات تمت الموافقة عليها خلال 7 أيام"
   },
   "states": {
     "noPermissionTitle": "ليست لديك صلاحية الوصول إلى هذا القسم",

@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Building2, GitBranch, Receipt, Users, UsersRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useBranches, useCompany, useCurrentUser, useEmployees, useSales, useTeams } from '@/data/queries';
+import { PlatformDashboard } from '@/features/dashboard/PlatformDashboard';
 import { useFormatters } from '@/shared/i18n/useFormatters';
 import { usePreferences } from '@/shared/stores/preferences';
 import { Card } from '@/shared/ui/Card';
@@ -40,17 +41,7 @@ export function DashboardPage() {
 
   if (!user) return null;
 
-  if (!user.companyId) {
-    return (
-      <>
-        <PageHeader title={t('nav.dashboard')} />
-        <Card className="mt-6 p-6">
-          <h2 className="text-lg font-semibold text-primary-900">{t('dashboard.platformTitle')}</h2>
-          <p className="mt-2 text-sm text-neutral-600">{t('dashboard.platformBody')}</p>
-        </Card>
-      </>
-    );
-  }
+  if (!user.companyId) return <PlatformDashboard />;
 
   const queries = [company, branches, teams, employees, sales];
   const hasError = queries.some((query) => query.isError);

@@ -2,12 +2,21 @@ import { db, MEMBER_SELECT, type MemberRow } from "./db.ts";
 import { HttpError } from "./http.ts";
 import { importMembers } from "./importer.ts";
 import {
+  deleteNotification,
+  listNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  notifyMembers,
+  passwordRequestRecipients,
+} from "./notifications.ts";
+import {
   assignableRolesBelow,
   canManage,
   isPlatformRole,
   parseAssignableRole,
   placementError,
   type Placement,
+  type Role,
 } from "./rules.ts";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,9 +100,41 @@ export async function performAction(actor: MemberRow, body: Record<string, unkno
       return checkPasswordRequest(actor, body);
     case "reviewPasswordRequest":
       return reviewPasswordRequest(actor, body);
+    case "platformStats":
+      return platformStats(actor);
+    case "listNotifications":
+      return listNotifications(actor);
+    case "markNotificationRead":
+      return markNotificationRead(actor, body);
+    case "markAllNotificationsRead":
+      return markAllNotificationsRead(actor);
+    case "deleteNotification":
+      return deleteNotification(actor, body);
     default:
       throw new HttpError(400, "unknown_action");
   }
+}
+
+async function platformStats(actor: MemberRow) {
+  if (!isPlatformRole(actor.role)) throw new HttpError(403, "forbidden");
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const [companies, admins, employees, pending, approved] = await Promise.all([
+    db.from("companies").select("id", { count: "exact", head: true }),
+    db.from("members").select("id", { count: "exact", head: true }).eq("role", "COMPANY_ADMIN"),
+    db.from("members").select("id", { count: "exact", head: true }).not("company_id", "is", null),
+    db.from("password_change_requests").select("id", { count: "exact", head: true }).eq("status", "pending").eq("target_role", "platform"),
+    db.from("password_change_requests").select("id", { count: "exact", head: true }).eq("status", "approved").gte("reviewed_at", since),
+  ]);
+  for (const result of [companies, admins, employees, pending, approved]) {
+    if (result.error) throw new HttpError(500, "stats_failed");
+  }
+  return {
+    companies: companies.count ?? 0,
+    companyAdmins: admins.count ?? 0,
+    employees: employees.count ?? 0,
+    pendingPasswordRequests: pending.count ?? 0,
+    recentlyApprovedPasswordRequests: approved.count ?? 0,
+  };
 }
 
 function requireString(value: unknown, field: string): string {
@@ -663,17 +704,24 @@ async function addCompanyAssistant(actor: MemberRow, body: Record<string, unknow
 
 // ── Password Change Requests ──────────────────────────────────
 
+// Company managers' requests go to platform owners; everyone else in a company goes to the company admin.
+function requestTargetRole(role: Role): "platform" | "company" {
+  return isPlatformRole(role) || role === "COMPANY_ADMIN" ? "platform" : "company";
+}
+
 async function listPasswordRequests(actor: MemberRow) {
   if (actor.role === "EMPLOYEE" && !hasCustomPermission(actor, "password.approve")) throw new HttpError(403, "forbidden");
   const platform = isPlatformRole(actor.role);
-  const cid = platform ? null : actor.company_id;
   let query = db
     .from("password_change_requests")
-    .select("id, member_id, company_id, status, requested_at, reviewed_at, reviewed_by, note, target_role, browser_fingerprint, members!member_id(full_name_en, email, user_id)")
+    .select("id, member_id, company_id, status, requested_at, reviewed_at, reviewed_by, note, target_role, browser_fingerprint, members!member_id(full_name_en, email, user_id, role), companies(name)")
     .order("requested_at", { ascending: false })
     .neq("member_id", actor.id);
-  if (cid) query = query.eq("company_id", cid);
-  if (platform) query = query.or(`target_role.eq.platform,company_id.is.null,target_role.is.null`);
+  if (platform) {
+    query = query.eq("target_role", "platform");
+  } else {
+    query = query.eq("company_id", actor.company_id as string).or("target_role.eq.company,target_role.is.null");
+  }
   const { data, error } = await query;
   if (error) throw error;
   return { requests: data ?? [] };
@@ -685,8 +733,7 @@ export async function requestPasswordByEmail(body: Record<string, unknown>) {
   const { data: member, error } = await db.from("members").select("id, company_id, role").eq("email", email).maybeSingle();
   if (error) throw error;
   if (member) {
-    const isPlatformOwner = member.role === "OWNER" || member.role === "SUPER_ADMIN";
-    const targetRole = isPlatformOwner ? "platform" : "company";
+    const targetRole = requestTargetRole(member.role as Role);
     let existingQuery = db
       .from("password_change_requests")
       .select("id")
@@ -722,15 +769,23 @@ async function createPasswordRequest(actor: MemberRow, body: Record<string, unkn
   const { data: existing } = await existingQuery.maybeSingle();
   if (existing) throw new HttpError(422, "request_already_pending");
 
-  const targetRole = isPlatformOwner ? "platform" : "company";
-  const { error } = await db.from("password_change_requests").insert({
+  const targetRole = requestTargetRole(actor.role);
+  const { data: created, error } = await db.from("password_change_requests").insert({
     member_id: actor.id,
     company_id: actor.company_id,
     status: "pending",
     browser_fingerprint: fingerprint,
     target_role: targetRole,
-  });
+  }).select("id").single();
   if (error) throw error;
+  const recipients = await passwordRequestRecipients(targetRole, actor.company_id, actor.id);
+  await notifyMembers(recipients, {
+    type: "password_request_created",
+    title: actor.full_name_en,
+    body: actor.email,
+    linkPath: "/password-requests",
+    dedupeKey: `password-request:${created.id}:created`,
+  });
   return { ok: true };
 }
 
@@ -757,7 +812,8 @@ async function reviewPasswordRequest(actor: MemberRow, body: Record<string, unkn
   const platform = isPlatformRole(actor.role);
   const cid = platform ? null : actor.company_id;
   let checkQuery = db.from("password_change_requests").select("id, company_id, member_id, status, target_role").eq("id", id).eq("status", "pending");
-  if (cid) checkQuery = checkQuery.eq("company_id", cid);
+  if (platform) checkQuery = checkQuery.eq("target_role", "platform");
+  else checkQuery = checkQuery.eq("company_id", cid as string).or("target_role.eq.company,target_role.is.null");
   const { data: req, error: checkError } = await checkQuery.maybeSingle();
   if (checkError) throw checkError;
   if (!req) throw new HttpError(404, "not_found");
@@ -768,6 +824,12 @@ async function reviewPasswordRequest(actor: MemberRow, body: Record<string, unkn
     reviewed_by: actor.id,
   }).eq("id", id);
   if (error) throw error;
+  await notifyMembers([(req as { member_id: string }).member_id], {
+    type: decision === "approved" ? "password_request_approved" : "password_request_rejected",
+    title: decision,
+    linkPath: "/",
+    dedupeKey: `password-request:${id}:${decision}`,
+  });
   if (decision === "approved") {
     await db.from("members").update({
       must_change_password: true,

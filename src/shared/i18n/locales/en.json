@@ -147,7 +147,11 @@
     "statBranches": "Branches",
     "statTeams": "Teams",
     "platformTitle": "Platform overview",
-    "platformBody": "Company management and platform-wide metrics arrive in a later milestone."
+    "platformCompanies": "Companies",
+    "platformCompanyAdmins": "Company managers",
+    "platformEmployees": "Registered employees",
+    "platformPendingRequests": "Pending password requests",
+    "platformRecentApproved": "Approved in the last 7 days"
   },
   "states": {
     "noPermissionTitle": "You do not have access to this",

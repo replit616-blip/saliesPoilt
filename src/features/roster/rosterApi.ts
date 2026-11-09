@@ -130,6 +130,18 @@ async function callRoster<T>(body: Record<string, unknown>): Promise<T> {
   return payload as T;
 }
 
+export interface PlatformStats {
+  companies: number;
+  companyAdmins: number;
+  employees: number;
+  pendingPasswordRequests: number;
+  recentlyApprovedPasswordRequests: number;
+}
+
+export async function fetchPlatformStats(): Promise<PlatformStats> {
+  return callRoster<PlatformStats>({ action: 'platformStats' });
+}
+
 export async function fetchCurrentMember(): Promise<RosterMember> {
   const { member } = await callRoster<{ member: RosterMember }>({ action: 'me' });
   return member;
