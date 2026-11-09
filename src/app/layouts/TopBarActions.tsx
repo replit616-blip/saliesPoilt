@@ -7,6 +7,7 @@ import { useCurrentUser } from '@/data/queries';
 import { DemoRoleSwitcherItems } from '@/app/dev/DemoRoleSwitcherItems';
 import { SHOW_DEMO_ROLE_SWITCHER } from '@/shared/constants/env';
 import { useAuth } from '@/features/auth/useAuth';
+import { useNotifications } from '@/features/notifications/useNotifications';
 
 function initialsOf(name: string): string {
   return name
@@ -85,6 +86,7 @@ function UserMenu() {
 
 export function TopBarActions() {
   const { t } = useTranslation();
+  const unreadCount = useNotifications().data?.unreadCount ?? 0;
   return (
     <div className="flex items-center gap-1 sm:gap-2">
       <NavLink
@@ -93,6 +95,11 @@ export function TopBarActions() {
         className="relative flex h-11 w-11 items-center justify-center rounded-full text-neutral-700 hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
       >
         <Bell className="h-5 w-5" aria-hidden="true" />
+        {unreadCount > 0 && (
+          <span className="absolute -end-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-error-600 px-1 text-[10px] font-semibold text-white">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
       </NavLink>
 
       <UserMenu />

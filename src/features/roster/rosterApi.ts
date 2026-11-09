@@ -339,3 +339,34 @@ export async function previewRosterImport(rows: RosterImportRow[]): Promise<Rost
 export async function commitRosterImport(rows: RosterImportRow[]): Promise<RosterImportResult> {
   return callRoster<RosterImportResult>({ action: 'import', rows, commit: true });
 }
+
+// ── Notifications ─────────────────────────────────────────────
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  link_path: string | null;
+  created_at: string;
+  read_at: string | null;
+}
+
+export async function fetchNotifications(): Promise<{ notifications: AppNotification[]; unreadCount: number }> {
+  const response = await callRoster<{ notifications: AppNotification[]; unreadCount: number }>({ action: 'listNotifications' });
+  if (!Array.isArray(response.notifications) || typeof response.unreadCount !== 'number') {
+    throw new RosterError(200, 'invalid_response');
+  }
+  return response;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await callRoster<{ ok: true }>({ action: 'markNotificationRead', id });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await callRoster<{ ok: true }>({ action: 'markAllNotificationsRead' });
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  await callRoster<{ ok: true }>({ action: 'deleteNotification', id });
+}

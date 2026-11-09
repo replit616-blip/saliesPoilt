@@ -14,6 +14,7 @@ import { RosterPage } from '@/features/roster/RosterPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { ProfilePage } from '@/features/profile/ProfilePage';
 import { OrganizationPage } from '@/features/organization/OrganizationPage';
+import { NotificationsPage } from '@/features/notifications/NotificationsPage';
 
 const sectionRoutes: RouteObject[] = NAV_ITEMS.map((item) => {
   const page = item.key === 'dashboard'
@@ -28,6 +29,8 @@ const sectionRoutes: RouteObject[] = NAV_ITEMS.map((item) => {
       ? <RanksPage />
       : item.key === 'passwordRequests'
       ? <PasswordRequestsPage />
+      : item.key === 'notifications'
+      ? <NotificationsPage />
       : item.key === 'teams'
         ? <OrganizationPage section="teams" />
     : item.key === 'settings'

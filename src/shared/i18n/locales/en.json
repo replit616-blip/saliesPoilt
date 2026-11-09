@@ -65,22 +65,70 @@
     "passwordRequests": "Password requests"
   },
   "sections": {
-    "companies": { "title": "Companies", "description": "Create, suspend and reactivate client companies." },
-    "branches": { "title": "Branches", "description": "Offices and showrooms across the UAE." },
-    "employees": { "title": "Employees", "description": "Staff, employee codes and reporting lines." },
-    "teams": { "title": "Teams", "description": "Sales teams, leaders and their members." },
-    "sales": { "title": "Sales", "description": "Record, review and approve sales." },
-    "salesImport": { "title": "Sales import", "description": "Bring in sales from Excel or CSV files." },
-    "reports": { "title": "Performance reports", "description": "Attainment, rankings and trends." },
-    "targets": { "title": "Targets & commissions", "description": "Set targets and track commission earnings." },
-    "approvals": { "title": "Approvals", "description": "Review pending sales, imports and commissions." },
-    "customers": { "title": "Customers & products", "description": "The customers and products your sales refer to." },
-    "notifications": { "title": "Notifications", "description": "Alerts and activity that need your attention." },
-    "auditLog": { "title": "Audit log", "description": "A record of every important change." },
-    "settings": { "title": "Settings", "description": "Company profile, approval rules and access." },
-    "profile": { "title": "My profile", "description": "Your details, password and sign-in security." },
-    "ranks": { "title": "Ranks", "description": "Create ranks and assign their permissions." },
-    "passwordRequests": { "title": "Password requests", "description": "Review password change requests." }
+    "companies": {
+      "title": "Companies",
+      "description": "Create, suspend and reactivate client companies."
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "Offices and showrooms across the UAE."
+    },
+    "employees": {
+      "title": "Employees",
+      "description": "Staff, employee codes and reporting lines."
+    },
+    "teams": {
+      "title": "Teams",
+      "description": "Sales teams, leaders and their members."
+    },
+    "sales": {
+      "title": "Sales",
+      "description": "Record, review and approve sales."
+    },
+    "salesImport": {
+      "title": "Sales import",
+      "description": "Bring in sales from Excel or CSV files."
+    },
+    "reports": {
+      "title": "Performance reports",
+      "description": "Attainment, rankings and trends."
+    },
+    "targets": {
+      "title": "Targets & commissions",
+      "description": "Set targets and track commission earnings."
+    },
+    "approvals": {
+      "title": "Approvals",
+      "description": "Review pending sales, imports and commissions."
+    },
+    "customers": {
+      "title": "Customers & products",
+      "description": "The customers and products your sales refer to."
+    },
+    "notifications": {
+      "title": "Notifications",
+      "description": "Alerts and activity that need your attention."
+    },
+    "auditLog": {
+      "title": "Audit log",
+      "description": "A record of every important change."
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Company profile, approval rules and access."
+    },
+    "profile": {
+      "title": "My profile",
+      "description": "Your details, password and sign-in security."
+    },
+    "ranks": {
+      "title": "Ranks",
+      "description": "Create ranks and assign their permissions."
+    },
+    "passwordRequests": {
+      "title": "Password requests",
+      "description": "Review password change requests."
+    }
   },
   "settings": {
     "title": "Personal settings",
@@ -480,6 +528,19 @@
       "pending": "Pending",
       "approved": "Approved",
       "rejected": "Rejected"
+    }
+  },
+  "notifications": {
+    "title": "Notifications",
+    "open": "Open",
+    "markRead": "Mark as read",
+    "markAllRead": "Mark all as read",
+    "delete": "Delete",
+    "empty": "You have no notifications.",
+    "types": {
+      "password_request_created": "New password reset request",
+      "password_request_approved": "Password reset request approved",
+      "password_request_rejected": "Password reset request rejected"
     }
   }
 }
