@@ -289,19 +289,19 @@ export async function listPasswordRequests(): Promise<{ requests: PasswordChange
   return callRoster<{ requests: PasswordChangeRequest[] }>({ action: 'listPasswordRequests' });
 }
 
-export async function createPasswordRequest(browserFingerprint: string): Promise<void> {
-  await callRoster<{ ok: true }>({ action: 'createPasswordRequest', browserFingerprint });
+export async function createPasswordRequest(browserFingerprint: string, resetKeyHash?: string): Promise<void> {
+  await callRoster<{ ok: true }>({ action: 'createPasswordRequest', browserFingerprint, resetKeyHash });
 }
 
 export async function checkPasswordRequest(browserFingerprint: string): Promise<{ pending: boolean; requestedAt: string | null }> {
   return callRoster<{ pending: boolean; requestedAt: string | null }>({ action: 'checkPasswordRequest', browserFingerprint });
 }
 
-export async function createPasswordRequestByEmail(email: string, browserFingerprint: string): Promise<void> {
+export async function createPasswordRequestByEmail(email: string, browserFingerprint: string, resetKeyHash?: string): Promise<void> {
   const response = await fetch(ROSTER_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'requestPasswordByEmail', email, browserFingerprint }),
+    body: JSON.stringify({ action: 'requestPasswordByEmail', email, browserFingerprint, resetKeyHash }),
   });
   if (!response.ok) throw new RosterError(response.status, 'request_failed');
 }
@@ -330,6 +330,39 @@ export async function addCompanyAssistant(input: {
 
 export async function reviewPasswordRequest(id: string, decision: 'approved' | 'rejected'): Promise<void> {
   await callRoster<{ ok: true }>({ action: 'reviewPasswordRequest', id, decision });
+}
+
+// ── Password reset completion (no sign-in required) ─────────
+export async function checkResetContext(browserFingerprint: string): Promise<{ available: boolean }> {
+  const response = await fetch(ROSTER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'checkResetContext', browserFingerprint }),
+  });
+  if (!response.ok) throw new RosterError(response.status, 'request_failed');
+  const payload = await response.json().catch(() => null);
+  if (typeof payload !== 'object' || payload === null) throw new RosterError(response.status, 'invalid_response');
+  return payload as { available: boolean };
+}
+
+export async function completePasswordReset(input: {
+  resetKey: string;
+  browserFingerprint: string;
+  newPassword: string;
+}): Promise<{ email: string }> {
+  const response = await fetch(ROSTER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'completePasswordReset', ...input }),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  const failure = (typeof payload === 'object' && payload !== null ? payload : {}) as { error?: unknown };
+  if (!response.ok) {
+    const code = typeof failure.error === 'string' ? failure.error : 'request_failed';
+    throw new RosterError(response.status, code);
+  }
+  if (typeof payload !== 'object' || payload === null) throw new RosterError(response.status, 'invalid_response');
+  return payload as { email: string };
 }
 
 export async function previewRosterImport(rows: RosterImportRow[]): Promise<RosterImportPreview> {

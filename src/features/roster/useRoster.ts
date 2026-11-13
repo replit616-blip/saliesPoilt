@@ -128,7 +128,8 @@ export function usePasswordRequests() {
 export function useCreatePasswordRequest() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (browserFingerprint: string) => createPasswordRequest(browserFingerprint),
+    mutationFn: (input: { browserFingerprint: string; resetKeyHash?: string }) =>
+      createPasswordRequest(input.browserFingerprint, input.resetKeyHash),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['password-requests'] }),
   });
 }

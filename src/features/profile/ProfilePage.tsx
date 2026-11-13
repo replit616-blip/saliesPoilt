@@ -75,7 +75,8 @@ export function ProfilePage() {
     setStatus('idle');
     const fp = getBrowserFingerprint();
     try {
-      await requestMutation.mutateAsync(fp);
+      const { resetKeyHash } = await getOrCreateResetKey();
+      await requestMutation.mutateAsync({ browserFingerprint: fp, resetKeyHash });
       setHasPending(true);
       setStatus('requestSent');
     } catch (error) {

@@ -8,7 +8,7 @@ import { Field, inputClass } from '@/shared/ui/Field';
 import { firebaseErrorCode } from '@/shared/auth/firebase';
 import { useAuth } from '@/features/auth/useAuth';
 import { checkPasswordRequestByEmail, createPasswordRequestByEmail } from '@/features/roster/rosterApi';
-import { getBrowserFingerprint } from '@/shared/utils/browserFingerprint';
+import { getBrowserFingerprint, getOrCreateResetKey } from '@/shared/utils/browserFingerprint';
 
 const schema = z.object({
   email: z.string().trim().email(),
@@ -40,12 +40,13 @@ export function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
     setStatus('idle');
     setChecking(true);
     try {
+      const { resetKeyHash } = await getOrCreateResetKey();
       const { pending } = await checkPasswordRequestByEmail(email, fp);
       if (pending) {
         setStatus('pending');
         return;
       }
-      await createPasswordRequestByEmail(email, fp);
+      await createPasswordRequestByEmail(email, fp, resetKeyHash);
       setStatus('requested');
     } catch {
       setStatus('unknown');
