@@ -1,5 +1,14 @@
 import { db, MEMBER_SELECT, type MemberRow } from "./db.ts";
 import { HttpError } from "./http.ts";
+import { updateFirebasePassword } from "./firebaseAdmin.ts";
+import {
+  consumeResetKey,
+  findApprovedResetContext,
+  isDuplicateKeyError,
+  releaseResetKey,
+  sha256Hex,
+  storeClientResetKey,
+} from "./passwordTokens.ts";
 import { importMembers } from "./importer.ts";
 import {
   deleteNotification,
@@ -20,7 +29,16 @@ import {
 } from "./rules.ts";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ALLOWED_WHILE_PASSWORD_CHANGE = new Set(["me", "passwordChanged"]);
+const ALLOWED_WHILE_PASSWORD_CHANGE = new Set([
+  "me",
+  "passwordChanged",
+  "profile",
+  "checkPasswordRequest",
+  "createPasswordRequest",
+]);
+
+// At most this many unauthenticated email requests per email per hour.
+const EMAIL_REQUEST_HOURLY_LIMIT = 5;
 
 export function placementOf(row: MemberRow): Placement {
   return { role: row.role, companyId: row.company_id, branchId: row.branch_id, teamId: row.team_id };
@@ -162,6 +180,12 @@ async function loadMember(id: string): Promise<MemberRow> {
 
 function hasCustomPermission(actor: MemberRow, permission: string): boolean {
   return actor.custom_ranks?.rank_permissions?.some((item) => item.permission === permission) ?? false;
+}
+
+function canReviewPasswordRequests(actor: MemberRow): boolean {
+  if (isPlatformRole(actor.role)) return true;
+  if (actor.role === "COMPANY_ADMIN") return true;
+  return actor.role === "EMPLOYEE" && hasCustomPermission(actor, "password.approve");
 }
 
 async function customRankMemberIds(actor: MemberRow): Promise<string[] | null> {
@@ -710,7 +734,7 @@ function requestTargetRole(role: Role): "platform" | "company" {
 }
 
 async function listPasswordRequests(actor: MemberRow) {
-  if (actor.role === "EMPLOYEE" && !hasCustomPermission(actor, "password.approve")) throw new HttpError(403, "forbidden");
+  if (!canReviewPasswordRequests(actor)) throw new HttpError(403, "forbidden");
   const platform = isPlatformRole(actor.role);
   let query = db
     .from("password_change_requests")
@@ -730,54 +754,75 @@ async function listPasswordRequests(actor: MemberRow) {
 export async function requestPasswordByEmail(body: Record<string, unknown>) {
   const email = requireString(body.email, "email").toLowerCase();
   const fingerprint = optionalString(body.browserFingerprint);
+  const resetKeyHash = optionalString(body.resetKeyHash);
+
+  // Rate limit: count this email's requests in the last hour.
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count: recentCount, error: countError } = await db
+    .from("password_change_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("requested_email", email)
+    .gte("requested_at", since);
+  if (!countError && (recentCount ?? 0) >= EMAIL_REQUEST_HOURLY_LIMIT) {
+    return { ok: true };
+  }
+
   const { data: member, error } = await db.from("members").select("id, company_id, role").eq("email", email).maybeSingle();
   if (error) throw error;
   if (member) {
     const targetRole = requestTargetRole(member.role as Role);
-    let existingQuery = db
+    const { data: created, error: insertError } = await db
       .from("password_change_requests")
-      .select("id")
-      .eq("member_id", member.id)
-      .eq("status", "pending");
-    if (fingerprint) existingQuery = existingQuery.eq("browser_fingerprint", fingerprint);
-    const { data: existing } = await existingQuery.maybeSingle();
-    if (!existing) {
-      const { error: insertError } = await db.from("password_change_requests").insert({
+      .insert({
         member_id: member.id,
         company_id: member.company_id,
         status: "pending",
+        requested_email: email,
         browser_fingerprint: fingerprint,
         target_role: targetRole,
+      })
+      .select("id")
+      .maybeSingle();
+    if (insertError && !isDuplicateKeyError(insertError)) throw insertError;
+    if (created) {
+      if (resetKeyHash) {
+        await storeClientResetKey({ requestId: created.id, memberId: member.id, resetKeyHash, fingerprint });
+      }
+      const recipients = await passwordRequestRecipients(targetRole, member.company_id, member.id);
+      await notifyMembers(recipients, {
+        type: "password_request_created",
+        title: "Password reset request",
+        body: email,
+        linkPath: "/password-requests",
+        dedupeKey: `password-request:${created.id}:created`,
       });
-      if (insertError) throw insertError;
     }
   }
+  // Always return the same shape so visitors cannot learn whether the email exists.
   return { ok: true };
 }
 
 async function createPasswordRequest(actor: MemberRow, body: Record<string, unknown>) {
   const fingerprint = optionalString(body.browserFingerprint);
-  const isPlatformOwner = isPlatformRole(actor.role);
-  if (!isPlatformOwner && !actor.company_id) throw new HttpError(403, "forbidden");
-
-  let existingQuery = db
-    .from("password_change_requests")
-    .select("id")
-    .eq("member_id", actor.id)
-    .eq("status", "pending");
-  if (fingerprint) existingQuery = existingQuery.eq("browser_fingerprint", fingerprint);
-  const { data: existing } = await existingQuery.maybeSingle();
-  if (existing) throw new HttpError(422, "request_already_pending");
+  const resetKeyHash = optionalString(body.resetKeyHash);
+  if (!isPlatformRole(actor.role) && !actor.company_id) throw new HttpError(403, "forbidden");
 
   const targetRole = requestTargetRole(actor.role);
   const { data: created, error } = await db.from("password_change_requests").insert({
     member_id: actor.id,
     company_id: actor.company_id,
     status: "pending",
+    requested_email: actor.email,
     browser_fingerprint: fingerprint,
     target_role: targetRole,
   }).select("id").single();
-  if (error) throw error;
+  if (error) {
+    if (isDuplicateKeyError(error)) throw new HttpError(422, "request_already_pending");
+    throw error;
+  }
+  if (resetKeyHash) {
+    await storeClientResetKey({ requestId: created.id, memberId: actor.id, resetKeyHash, fingerprint });
+  }
   const recipients = await passwordRequestRecipients(targetRole, actor.company_id, actor.id);
   await notifyMembers(recipients, {
     type: "password_request_created",
@@ -804,39 +849,41 @@ async function checkPasswordRequest(actor: MemberRow, body: Record<string, unkno
 }
 
 async function reviewPasswordRequest(actor: MemberRow, body: Record<string, unknown>) {
-  if (actor.role === "EMPLOYEE" && !hasCustomPermission(actor, "password.approve")) throw new HttpError(403, "forbidden");
+  if (!canReviewPasswordRequests(actor)) throw new HttpError(403, "forbidden");
   const id = optionalUuid(body.id, "id");
   if (!id) throw new HttpError(422, "invalid_id");
   const decision = requireString(body.decision, "decision");
   if (decision !== "approved" && decision !== "rejected") throw new HttpError(422, "invalid_decision");
   const platform = isPlatformRole(actor.role);
   const cid = platform ? null : actor.company_id;
-  let checkQuery = db.from("password_change_requests").select("id, company_id, member_id, status, target_role").eq("id", id).eq("status", "pending");
+  let checkQuery = db.from("password_change_requests").select("id, company_id, member_id, status, target_role, browser_fingerprint").eq("id", id).eq("status", "pending");
   if (platform) checkQuery = checkQuery.eq("target_role", "platform");
   else checkQuery = checkQuery.eq("company_id", cid as string).or("target_role.eq.company,target_role.is.null");
   const { data: req, error: checkError } = await checkQuery.maybeSingle();
   if (checkError) throw checkError;
   if (!req) throw new HttpError(404, "not_found");
-  if ((req as { member_id: string }).member_id === actor.id) throw new HttpError(403, "cannot_review_own_request");
-  const { error } = await db.from("password_change_requests").update({
-    status: decision,
-    reviewed_at: new Date().toISOString(),
-    reviewed_by: actor.id,
-  }).eq("id", id);
+  const target = req as { id: string; member_id: string; browser_fingerprint: string | null };
+  if (target.member_id === actor.id) throw new HttpError(403, "cannot_review_own_request");
+
+  // Atomic decision: only a still-pending row can transition, so double
+  // review or a concurrent opposite decision silently affects zero rows.
+  const now = new Date().toISOString();
+  const { data: updated, error } = await db
+    .from("password_change_requests")
+    .update({ status: decision, reviewed_at: now, reviewed_by: actor.id })
+    .eq("id", id)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
-  await notifyMembers([(req as { member_id: string }).member_id], {
+  if (!updated) throw new HttpError(409, "request_already_reviewed");
+
+  await notifyMembers([target.member_id], {
     type: decision === "approved" ? "password_request_approved" : "password_request_rejected",
     title: decision,
     linkPath: "/",
     dedupeKey: `password-request:${id}:${decision}`,
   });
-  if (decision === "approved") {
-    await db.from("members").update({
-      must_change_password: true,
-      temp_password: null,
-      updated_at: new Date().toISOString(),
-    }).eq("id", (req as { member_id: string }).member_id);
-  }
   return { ok: true };
 }
 
@@ -856,4 +903,76 @@ export async function checkPasswordRequestByEmail(body: Record<string, unknown>)
     .maybeSingle();
   if (error) throw error;
   return { pending: Boolean(data), requestedAt: data?.requested_at ?? null };
+}
+
+// ── Password reset completion (limited context, no full session) ──────
+
+/**
+ * Completes a password change using a recovery context bound to the browser.
+ * Runs without a full member session: the reset key + fingerprint are the only
+ * credentials, and the only effect allowed is changing the requester's own
+ * password. Never returns member data.
+ */
+export async function completePasswordReset(body: Record<string, unknown>) {
+  const rawKey = requireString(body.resetKey, "reset_key");
+  const fingerprint = requireString(body.browserFingerprint, "browser_fingerprint");
+  const newPassword = requireString(body.newPassword, "password");
+  if (newPassword.length < 8) throw new HttpError(422, "password_too_short");
+
+  const context = await consumeResetKey(rawKey, fingerprint);
+  try {
+    const { data: request, error: reqError } = await db
+      .from("password_change_requests")
+      .select("id, member_id, status")
+      .eq("id", context.requestId)
+      .eq("member_id", context.memberId)
+      .maybeSingle();
+    if (reqError) throw reqError;
+    if (!request || (request as { status: string }).status !== "approved") {
+      throw new HttpError(403, "invalid_reset_token");
+    }
+
+    const member = await loadMember(context.memberId);
+    if (!member.firebase_uid) throw new HttpError(422, "account_not_linked");
+
+    // Change the real Firebase password. On failure the token stays consumed;
+    // we release it so the requester can retry within the same window.
+    try {
+      await updateFirebasePassword(member.firebase_uid, newPassword);
+    } catch (err) {
+      await releaseResetKey(context.tokenId);
+      console.error("password reset: firebase update failed", err instanceof Error ? err.message : err);
+      throw new HttpError(502, "firebase_update_failed");
+    }
+
+    // Mark request completed and clear the forced-change flag atomically.
+    const now = new Date().toISOString();
+    const { error: markError } = await db
+      .from("password_change_requests")
+      .update({ status: "completed", reviewed_at: now })
+      .eq("id", context.requestId)
+      .eq("status", "approved");
+    if (markError) throw markError;
+    const { error: memberError } = await db
+      .from("members")
+      .update({ must_change_password: false, temp_password: null, updated_at: now })
+      .eq("id", context.memberId);
+    if (memberError) throw memberError;
+    return { ok: true, email: member.email };
+  } catch (err) {
+    if (err instanceof HttpError && err.status !== 502) {
+      // keep consumed — invalid attempts stay consumed
+    }
+    throw err;
+  }
+}
+
+/**
+ * Reports whether this browser currently holds an approved, unconsumed reset
+ * context. No member data is returned.
+ */
+export async function checkResetContext(body: Record<string, unknown>) {
+  const fingerprint = requireString(body.browserFingerprint, "browser_fingerprint");
+  const ctx = await findApprovedResetContext(fingerprint);
+  return { available: Boolean(ctx) };
 }
