@@ -4,7 +4,7 @@ import { db, MEMBER_SELECT, type MemberRow } from "./db.ts";
 import { corsHeaders, HttpError, json } from "./http.ts";
 
 const FIREBASE_PROJECT_ID = "salespilot-e581d";
-const ROSTER_FUNCTION_VERSION = "2026-11-06-rev3";
+const ROSTER_FUNCTION_VERSION = "2026-11-13-rev1";
 const FIREBASE_KEYS = createRemoteJWKSet(
   new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
 );
